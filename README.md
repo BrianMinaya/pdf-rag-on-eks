@@ -90,16 +90,20 @@ aws eks update-kubeconfig --region us-east-1 --name pdf-rag-chatbot
 # 3. Build and push Docker images to ECR
 ./scripts/build-and-push.sh
 
-# 4. Deploy all Kubernetes services
+# 4. Create your secrets file
+cp k8s/secrets.yaml.example k8s/secrets.yaml
+# Edit k8s/secrets.yaml with your actual credentials
+
+# 5. Deploy all Kubernetes services
 ./scripts/deploy-all.sh
 
-# 5. Place your PDF(s) in data/, then run ingestion
+# 6. Place your PDF(s) in data/, then run ingestion
 kubectl apply -f k8s/ingestion/job.yaml
 
-# 6. Start up (scales GPU node, sets up port-forwarding)
+# 7. Start up (scales GPU node, sets up port-forwarding)
 ./scripts/startup.sh
 
-# 7. Open the web UI
+# 8. Open the web UI
 open http://localhost:8000
 ```
 
