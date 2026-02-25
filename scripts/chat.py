@@ -24,6 +24,9 @@ entries: {"role": "user", "content": "..."} and {"role": "assistant",
 Chat API expects. The full history is sent with every request so the LLM
 has context for follow-up questions.
 
+Requirements:
+    pip install httpx
+
 Usage:
     # First, port-forward the Chat API:
     kubectl port-forward svc/chat-api 8000:8000 -n pdf-rag-chatbot

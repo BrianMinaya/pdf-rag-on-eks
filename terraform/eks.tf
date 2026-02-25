@@ -8,7 +8,7 @@
 #
 # Our cluster has TWO node groups:
 #
-#   1. CPU Nodes (t4g.large, Graviton ARM, ON-DEMAND)
+#   1. CPU Nodes (t3.xlarge, x86, ON-DEMAND)
 #      - Run: Chat API, Embedding Server, Qdrant, PostgreSQL, Ingestion
 #      - Always running (min 1 node) to keep the system available
 #

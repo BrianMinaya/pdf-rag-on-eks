@@ -55,16 +55,15 @@ k8s/                        Kubernetes manifests
   vllm/                       vLLM deployment + service
   configmap.yaml              Shared environment config
   namespace.yaml              Namespace definition
+  secrets.yaml.example        Template for K8s secrets (copy to secrets.yaml)
 services/
   chat-api/                 FastAPI RAG orchestrator + web chat UI
-  embedding/                Nomic V1.5 embedding wrapper
   ingestion/                PDF parsing + chunking + embedding pipeline
 scripts/
   build-and-push.sh           Build Docker images and push to ECR
-  deploy-all.sh               Apply all K8s manifests
-  startup.sh                  Scale up GPU node + port-forward
-  shutdown.sh                 Scale down GPU node to zero
-  chat.py                     Interactive CLI chat client
+  startup.sh                  Scale up node groups
+  shutdown.sh                 Scale down node groups to zero
+  chat.py                     Interactive CLI chat client (pip install httpx)
   test-rag.sh                 Quick RAG smoke test
 docs/diagrams/              Interactive HTML architecture diagrams
 data/                       PDF files (gitignored)
@@ -75,36 +74,144 @@ data/                       PDF files (gitignored)
 - **AWS Account** with permissions for EKS, EC2, ECR, VPC, IAM
 - **GPU quota**: at least 4 vCPUs for G-family spot instances in us-east-1
 - **CLI tools**: AWS CLI, OpenTofu v1.5+, kubectl, Docker
-- **HuggingFace token**: for pulling gated model weights (Llama 3.1)
+- **HuggingFace account**: Llama 3.1 is a gated model — [accept Meta's license](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B-Instruct) on HuggingFace, then [create an access token](https://huggingface.co/settings/tokens)
 
 ## Quick Start
 
+### 1. Provision infrastructure
+
 ```bash
-# 1. Provision AWS infrastructure
 cd terraform
 tofu init && tofu apply
+```
 
-# 2. Configure kubectl
+### 2. Configure kubectl
+
+```bash
 aws eks update-kubeconfig --region us-east-1 --name pdf-rag-chatbot
+```
 
-# 3. Build and push Docker images to ECR
+### 3. Build and push Docker images
+
+```bash
 ./scripts/build-and-push.sh
+```
 
-# 4. Create your secrets file
+This builds `chat-api` and `ingestion` for linux/amd64 and pushes to ECR. The account ID is detected automatically.
+
+### 4. Update K8s image references
+
+Replace the `<YOUR_AWS_ACCOUNT_ID>` placeholder in these two files with your AWS account ID:
+
+- `k8s/chat-api/deployment.yaml` (line 52)
+- `k8s/ingestion/job.yaml` (line 87)
+
+```bash
+# Find your account ID
+aws sts get-caller-identity --query Account --output text
+
+# Replace in both files (macOS sed)
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+sed -i '' "s/<YOUR_AWS_ACCOUNT_ID>/$ACCOUNT_ID/g" k8s/chat-api/deployment.yaml k8s/ingestion/job.yaml
+```
+
+### 5. Create secrets
+
+```bash
 cp k8s/secrets.yaml.example k8s/secrets.yaml
-# Edit k8s/secrets.yaml with your actual credentials
+```
 
-# 5. Deploy all Kubernetes services
-./scripts/deploy-all.sh
+Edit `k8s/secrets.yaml` — uncomment `HF_TOKEN` and paste your HuggingFace token. Change `POSTGRES_PASSWORD` to something secure.
 
-# 6. Place your PDF(s) in data/, then run ingestion
-kubectl apply -f k8s/ingestion/job.yaml
+### 6. Deploy services
 
-# 7. Start up (scales GPU node, sets up port-forwarding)
+Apply manifests in dependency order:
+
+```bash
+# Namespace and config first
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/configmap.yaml
+kubectl apply -f k8s/secrets.yaml
+
+# Storage layer
+kubectl apply -f k8s/qdrant/
+kubectl apply -f k8s/postgres/
+
+# Embedding server (takes 1-2 min to download model)
+kubectl apply -f k8s/embedding/
+
+# NVIDIA device plugin (required before vLLM)
+kubectl apply -f k8s/nvidia-device-plugin.yaml
+
+# Chat API (works without vLLM — will just fail on LLM calls until vLLM is up)
+kubectl apply -f k8s/chat-api/
+```
+
+### 7. Scale up GPU and deploy vLLM
+
+```bash
+# Scale up the GPU node (takes ~90 seconds)
 ./scripts/startup.sh
 
-# 8. Open the web UI
+# Wait for the GPU node to join
+kubectl get nodes -w
+
+# Deploy vLLM (takes 3-5 min to download and load model)
+kubectl apply -f k8s/vllm/
+
+# Monitor progress
+kubectl -n pdf-rag-chatbot get pods -w
+```
+
+### 8. Upload PDFs and run ingestion
+
+The ingestion job reads PDFs from a PersistentVolumeClaim (PVC) inside the cluster, not from your local filesystem.
+
+```bash
+# Create the PVC
+kubectl apply -f k8s/ingestion/pvc.yaml
+
+# Spin up a temporary pod to copy files into the PVC
+kubectl run pdf-loader --image=busybox --restart=Never \
+  --overrides='{"spec":{"containers":[{"name":"pdf-loader","image":"busybox","command":["sleep","3600"],"volumeMounts":[{"name":"pdf-data","mountPath":"/data"}]}],"volumes":[{"name":"pdf-data","persistentVolumeClaim":{"claimName":"pdf-data"}}]}}' \
+  -n pdf-rag-chatbot
+
+# Copy your PDF into the PVC
+kubectl cp my-document.pdf pdf-rag-chatbot/pdf-loader:/data/my-document.pdf
+
+# Clean up the loader pod
+kubectl delete pod pdf-loader -n pdf-rag-chatbot
+
+# Run ingestion
+kubectl apply -f k8s/ingestion/job.yaml
+
+# Watch progress
+kubectl logs -f job/ingestion -n pdf-rag-chatbot
+```
+
+To re-run ingestion (e.g., after adding new PDFs), delete the old job first:
+
+```bash
+kubectl delete job ingestion -n pdf-rag-chatbot
+kubectl apply -f k8s/ingestion/job.yaml
+```
+
+### 9. Use the chatbot
+
+```bash
+# Port-forward the Chat API to your local machine
+kubectl port-forward svc/chat-api 8000:8000 -n pdf-rag-chatbot &
+
+# Web UI
 open http://localhost:8000
+
+# Or use the CLI chat client (requires: pip install httpx)
+python scripts/chat.py
+
+# Or hit the API directly
+curl -s -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is this document about?"}'
 ```
 
 ## Cost Management
@@ -112,10 +219,10 @@ open http://localhost:8000
 GPU instances are expensive. The included scripts make it easy to spin up only when needed:
 
 ```bash
-# Done for the day? Scale GPU to zero (~$0.21/hr saved)
+# Done for the day? Scale all nodes to zero
 ./scripts/shutdown.sh
 
-# Ready to work again? Scale GPU back up
+# Ready to work again? Scale nodes back up
 ./scripts/startup.sh
 ```
 
@@ -123,6 +230,7 @@ Additional cost measures:
 - GPU nodes use **spot instances** (up to 70% cheaper than on-demand)
 - GPU desired size defaults to **0** — no GPU cost until you explicitly scale up
 - CPU nodes use affordable **t3.xlarge** on-demand instances (~$0.17/hr)
+- EKS control plane runs at ~$0.10/hr regardless of node count
 
 ## How It Works
 

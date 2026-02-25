@@ -23,11 +23,6 @@ __pycache__/
 venv/
 *.egg-info/
 
-# Node (frontend)
-node_modules/
-services/frontend/build/
-services/frontend/dist/
-
 # IDE
 .vscode/
 .idea/

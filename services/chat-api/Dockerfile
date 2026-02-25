@@ -1,8 +1,8 @@
 # =============================================================================
-# Chat API Dockerfile -- Multi-stage build for ARM64 (AWS Graviton)
+# Chat API Dockerfile -- Multi-stage build for x86_64 (AWS t3.xlarge)
 #
 # This Dockerfile builds the FastAPI RAG orchestrator service. It runs on
-# ARM-based CPU nodes (t4g.large) in EKS, which are cheaper than x86 instances.
+# x86 CPU nodes (t3.xlarge) in EKS.
 #
 # Multi-stage builds keep the final image small by separating the build
 # environment (with compilers, headers) from the runtime environment.

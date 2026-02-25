@@ -6,18 +6,16 @@
 # Docker Hub (which would require internet egress and has rate limits), we
 # store our application images in ECR within our own AWS account.
 #
-# We create four repositories, one for each service in the RAG pipeline:
+# We create two repositories for our custom-built services:
 #
-#   1. chat-api         -- The FastAPI service that handles user questions,
-#                          retrieves context from Qdrant, and calls vLLM
+#   1. chat-api   -- The FastAPI service that handles user questions,
+#                    retrieves context from Qdrant, and calls vLLM
 #
-#   2. ingestion        -- The CronJob that pulls PDFs, chunks text, generates
-#                          embeddings, and stores vectors in Qdrant
+#   2. ingestion  -- The batch job that pulls PDFs, chunks text, generates
+#                    embeddings, and stores vectors in Qdrant
 #
-#   3. embedding-server -- Serves the Nomic Embed Text V1.5 model for
-#                          converting text into vector embeddings
-#
-#   4. frontend         -- The web UI where users ask questions
+# Other services (vLLM, TEI embedding, Qdrant, PostgreSQL) use official
+# Docker images pulled directly from their public registries.
 #
 # Each repository is configured with:
 #   - image_tag_mutability = "MUTABLE": allows overwriting tags like "latest".
@@ -40,10 +38,8 @@
 # ---------------------------------------------------------------------------
 locals {
   ecr_repositories = {
-    chat_api         = "${var.project_name}/chat-api"
-    ingestion        = "${var.project_name}/ingestion"
-    embedding_server = "${var.project_name}/embedding-server"
-    frontend         = "${var.project_name}/frontend"
+    chat_api  = "${var.project_name}/chat-api"
+    ingestion = "${var.project_name}/ingestion"
   }
 }
 

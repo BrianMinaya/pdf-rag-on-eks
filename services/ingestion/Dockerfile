@@ -1,5 +1,5 @@
 # =============================================================================
-# Ingestion Service Dockerfile -- Multi-stage build for ARM64 (AWS Graviton)
+# Ingestion Service Dockerfile -- Multi-stage build for x86_64 (AWS t3.xlarge)
 #
 # This Dockerfile builds the PDF ingestion pipeline. It parses PDFs, chunks
 # the text, generates embeddings via the TEI server, and stores vectors in
