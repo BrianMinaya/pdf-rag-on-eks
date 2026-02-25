@@ -1,0 +1,27 @@
+# =============================================================================
+# EMBEDDING SERVICE
+# =============================================================================
+# ClusterIP Service for the Text Embeddings Inference server.
+# Other pods connect via: http://embedding:8080
+#
+# Both the chat-api and ingestion services call this endpoint to convert
+# text into 768-dimensional vectors for Qdrant storage and search.
+# =============================================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: embedding
+  namespace: pdf-rag-chatbot
+  labels:
+    app: embedding
+    project: pdf-rag-chatbot
+spec:
+  type: ClusterIP
+  selector:
+    app: embedding
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP

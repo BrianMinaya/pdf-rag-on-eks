@@ -1,0 +1,43 @@
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/.terraform.lock.hcl
+terraform/terraform.tfvars
+
+# Environment
+.env
+.env.local
+
+# Data (PDFs are large and should not be in git)
+data/*.pdf
+
+# Kubernetes secrets
+k8s/secrets.yaml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Node (frontend)
+node_modules/
+services/frontend/build/
+services/frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude AI assistant
+.claude/
+CLAUDE.md
+
+# OS
+.DS_Store
+Thumbs.db

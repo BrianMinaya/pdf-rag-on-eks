@@ -1,0 +1,100 @@
+# =============================================================================
+# TEXT EMBEDDINGS INFERENCE (TEI) -- Embedding Model Deployment
+# =============================================================================
+# WHAT IS TEI?
+# Text Embeddings Inference is a purpose-built server from HuggingFace for
+# serving embedding models. Think of it as "vLLM but for embeddings."
+# Just as vLLM is optimized for text generation (LLMs), TEI is optimized
+# for producing embeddings (converting text to vectors).
+#
+# WHAT ARE EMBEDDINGS?
+# An embedding is a fixed-size array of numbers (a "vector") that represents
+# the meaning of a piece of text. Similar texts produce similar vectors.
+# For example, "how to reset my password" and "password reset instructions"
+# would have vectors that are very close together in 768-dimensional space.
+#
+# We use Nomic Embed Text v1.5, which outputs 768-dimensional vectors.
+#
+# WHO CALLS THIS SERVICE?
+# 1. Ingestion service: Embeds PDF chunks before storing in Qdrant
+# 2. Chat API: Embeds the user's question to search Qdrant for similar chunks
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: embedding
+  namespace: pdf-rag-chatbot
+  labels:
+    app: embedding
+    project: pdf-rag-chatbot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: embedding
+
+  template:
+    metadata:
+      labels:
+        app: embedding
+        project: pdf-rag-chatbot
+    spec:
+      nodeSelector:
+        workload: cpu
+
+      containers:
+        - name: embedding
+          # -----------------------------------------------------------------
+          # TEI CPU image -- optimized for CPU-based embedding inference.
+          # The "cpu-1.8" tag means TEI version 1.8, CPU variant (x86_64).
+          # -----------------------------------------------------------------
+          image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.8
+
+          # -----------------------------------------------------------------
+          # ARGS -- Command-line arguments passed to the TEI binary.
+          # --model-id: HuggingFace model to download and serve.
+          # --port: Port to listen on inside the container.
+          # -----------------------------------------------------------------
+          args:
+            - "--model-id"
+            - "nomic-ai/nomic-embed-text-v1.5"
+            - "--port"
+            - "8080"
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          # -----------------------------------------------------------------
+          # RESOURCE MANAGEMENT
+          # -----------------------------------------------------------------
+          # Only requests are set (no memory limit). The candle backend
+          # that TEI uses for Nomic V1.5 needs ~10-12Gi during warmup
+          # (model load + buffer pre-allocation) even though steady-state
+          # usage is lower. Setting a limit causes OOMKilled during
+          # startup. Without a limit, K8s allows the container to use
+          # available node memory. The request guarantees scheduling on
+          # a node with at least 4Gi free.
+          # -----------------------------------------------------------------
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "500m"
+            limits:
+              cpu: "2000m"
+
+          # -----------------------------------------------------------------
+          # READINESS PROBE
+          # -----------------------------------------------------------------
+          # TEI returns 200 on "/" when the model is loaded and ready.
+          # First startup downloads the model (~550MB) which takes 30-120s.
+          # -----------------------------------------------------------------
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 12

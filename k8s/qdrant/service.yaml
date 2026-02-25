@@ -1,0 +1,41 @@
+# =============================================================================
+# QDRANT SERVICE
+# =============================================================================
+# A Service provides a stable network endpoint for a set of pods. Pods are
+# ephemeral -- they get new IP addresses when they restart. The Service
+# provides a fixed DNS name ("qdrant") and IP that other pods can rely on.
+#
+# TYPE: ClusterIP (default)
+# ClusterIP means this Service is only accessible INSIDE the cluster.
+# Other pods reach Qdrant via: http://qdrant:6333 or qdrant:6334
+#
+# The full DNS name is: qdrant.pdf-rag-chatbot.svc.cluster.local
+# But within the same namespace, just "qdrant" works.
+#
+# HOW IT WORKS:
+# The Service uses a "selector" to find pods with matching labels.
+# Any pod with "app: qdrant" gets traffic routed to it by this Service.
+# Kubernetes automatically updates the routing when pods come and go.
+# =============================================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+  namespace: pdf-rag-chatbot
+  labels:
+    app: qdrant
+    project: pdf-rag-chatbot
+spec:
+  type: ClusterIP
+  selector:
+    app: qdrant                    # Route traffic to pods with this label
+  ports:
+    - name: http
+      port: 6333                   # Port the Service listens on
+      targetPort: 6333             # Port on the container to forward to
+      protocol: TCP
+    - name: grpc
+      port: 6334
+      targetPort: 6334
+      protocol: TCP

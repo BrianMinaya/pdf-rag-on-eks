@@ -1,0 +1,31 @@
+# =============================================================================
+# CHAT API SERVICE
+# =============================================================================
+# ClusterIP Service for the Chat API. This is the entry point for the
+# frontend (or any client) to interact with the RAG chatbot.
+#
+# Currently, this is a ClusterIP (internal only). To expose it externally,
+# you would add an Ingress resource or change this to a LoadBalancer type.
+#
+# Port-forward for local testing:
+#   kubectl port-forward svc/chat-api 8000:8000 -n pdf-rag-chatbot
+#   curl http://localhost:8000/health
+# =============================================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: chat-api
+  namespace: pdf-rag-chatbot
+  labels:
+    app: chat-api
+    project: pdf-rag-chatbot
+spec:
+  type: ClusterIP
+  selector:
+    app: chat-api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP

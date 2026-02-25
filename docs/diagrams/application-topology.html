@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Application Topology -- PDF RAG Chatbot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0c0e12;
+    --bg-grid: #12151b;
+    --surface: #161a22;
+    --surface-border: #242a36;
+    --elevated: #1c2130;
+    --elevated-border: #2e3648;
+    --text: #d4dae6;
+    --text-dim: #6b7a94;
+    --text-muted: #3d4a60;
+    --ingest: #f59e0b;
+    --ingest-dim: rgba(245, 158, 11, 0.06);
+    --ingest-border: rgba(245, 158, 11, 0.2);
+    --rag: #34d399;
+    --rag-dim: rgba(52, 211, 153, 0.06);
+    --rag-border: rgba(52, 211, 153, 0.2);
+    --service: #60a5fa;
+    --service-dim: rgba(96, 165, 250, 0.06);
+    --service-border: rgba(96, 165, 250, 0.2);
+    --llm: #f472b6;
+    --llm-dim: rgba(244, 114, 182, 0.06);
+    --llm-border: rgba(244, 114, 182, 0.2);
+    --vector: #a78bfa;
+    --vector-dim: rgba(167, 139, 250, 0.06);
+    --vector-border: rgba(167, 139, 250, 0.2);
+    --arrow: #3d4a60;
+    --font-mono: 'JetBrains Mono', monospace;
+    --font-body: 'Outfit', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    min-height: 100vh;
+    padding: 48px 32px;
+    background-image:
+      linear-gradient(var(--bg-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+    background-size: 40px 40px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page { max-width: 1100px; margin: 0 auto; }
+
+  /* ── Title ── */
+  .title-block {
+    text-align: center;
+    margin-bottom: 56px;
+    animation: fadeDown 0.6s ease;
+  }
+
+  .title-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--rag);
+    margin-bottom: 12px;
+  }
+
+  .title-main {
+    font-size: 32px;
+    font-weight: 300;
+    letter-spacing: -0.02em;
+    color: var(--text);
+  }
+
+  .title-main strong { font-weight: 600; }
+
+  .title-sub {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-top: 10px;
+  }
+
+  /* ── Section headers ── */
+  .section {
+    margin-bottom: 56px;
+    animation: fadeUp 0.7s ease both;
+  }
+
+  .section:nth-child(2) { animation-delay: 0.1s; }
+  .section:nth-child(3) { animation-delay: 0.2s; }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .section-number {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .section-title {
+    font-size: 20px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  .section-desc {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-left: auto;
+  }
+
+  /* ── Ingestion pipeline ── */
+  .ingest-section .section-number {
+    background: var(--ingest-dim);
+    border: 1px solid var(--ingest-border);
+    color: var(--ingest);
+  }
+
+  .pipeline {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
+
+  .pipeline-step {
+    flex: 1;
+    min-width: 180px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .step-card {
+    border-radius: 10px;
+    padding: 16px 18px;
+    flex: 1;
+    position: relative;
+  }
+
+  .ingest-section .step-card {
+    background: var(--ingest-dim);
+    border: 1px solid var(--ingest-border);
+  }
+
+  .step-num {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .ingest-section .step-num { color: var(--ingest); }
+
+  .step-name {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+
+  .step-file {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+
+  .step-detail {
+    font-size: 12px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    line-height: 1.6;
+  }
+
+  .step-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    flex-shrink: 0;
+  }
+
+  .step-arrow svg {
+    width: 24px;
+    height: 24px;
+    color: var(--arrow);
+  }
+
+  .data-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+    text-align: center;
+    margin-top: 4px;
+  }
+
+  /* ── RAG query flow ── */
+  .rag-section .section-number {
+    background: var(--rag-dim);
+    border: 1px solid var(--rag-border);
+    color: var(--rag);
+  }
+
+  .rag-flow {
+    position: relative;
+  }
+
+  .rag-wrapper {
+    border: 1px solid var(--rag-border);
+    border-radius: 12px;
+    background: var(--rag-dim);
+    padding: 20px;
+    position: relative;
+  }
+
+  .rag-wrapper-label {
+    position: absolute;
+    top: -10px;
+    left: 20px;
+    background: var(--bg);
+    padding: 0 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--rag);
+  }
+
+  .rag-steps {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+  }
+
+  .rag-step {
+    background: var(--elevated);
+    border: 1px solid var(--elevated-border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    position: relative;
+    transition: border-color 0.2s;
+  }
+
+  .rag-step:hover { border-color: #4a5672; }
+
+  .rag-step-num {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 8px;
+  }
+
+  .rag-step:nth-child(1) .rag-step-num { background: rgba(96,165,250,0.12); color: var(--service); }
+  .rag-step:nth-child(2) .rag-step-num { background: rgba(167,139,250,0.12); color: var(--vector); }
+  .rag-step:nth-child(3) .rag-step-num { background: rgba(52,211,153,0.12); color: var(--rag); }
+  .rag-step:nth-child(4) .rag-step-num { background: rgba(244,114,182,0.12); color: var(--llm); }
+  .rag-step:nth-child(5) .rag-step-num { background: rgba(245,158,11,0.12); color: var(--ingest); }
+
+  .rag-step-name {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+
+  .rag-step-target {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    display: inline-block;
+    margin-bottom: 8px;
+  }
+
+  .rag-step:nth-child(1) .rag-step-target { background: rgba(96,165,250,0.08); color: rgba(96,165,250,0.7); border: 1px solid rgba(96,165,250,0.12); }
+  .rag-step:nth-child(2) .rag-step-target { background: rgba(167,139,250,0.08); color: rgba(167,139,250,0.7); border: 1px solid rgba(167,139,250,0.12); }
+  .rag-step:nth-child(3) .rag-step-target { background: rgba(52,211,153,0.08); color: rgba(52,211,153,0.7); border: 1px solid rgba(52,211,153,0.12); }
+  .rag-step:nth-child(4) .rag-step-target { background: rgba(244,114,182,0.08); color: rgba(244,114,182,0.7); border: 1px solid rgba(244,114,182,0.12); }
+  .rag-step:nth-child(5) .rag-step-target { background: rgba(245,158,11,0.08); color: rgba(245,158,11,0.7); border: 1px solid rgba(245,158,11,0.12); }
+
+  .rag-step-detail {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+
+  .rag-step-latency {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--elevated-border);
+  }
+
+  /* Connector arrows between RAG steps */
+  .rag-step:not(:last-child)::after {
+    content: "\2192";
+    position: absolute;
+    right: -14px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 16px;
+    color: var(--arrow);
+    z-index: 1;
+  }
+
+  /* ── Input/Output bars above and below ── */
+  .io-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    margin-bottom: 14px;
+  }
+
+  .io-bar.input {
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+  }
+
+  .io-bar.output {
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    margin-top: 14px;
+    margin-bottom: 0;
+  }
+
+  .io-icon { font-size: 16px; flex-shrink: 0; }
+
+  .io-label {
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .io-detail {
+    color: var(--text-dim);
+    font-size: 11px;
+  }
+
+  .io-arrow {
+    margin-left: auto;
+    color: var(--arrow);
+    font-size: 14px;
+  }
+
+  /* ── Data models section ── */
+  .models-section .section-number {
+    background: var(--service-dim);
+    border: 1px solid var(--service-border);
+    color: var(--service);
+  }
+
+  .models-grid {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 16px;
+    align-items: start;
+  }
+
+  .model-card {
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    transition: border-color 0.2s;
+  }
+
+  .model-card:hover { border-color: #4a5672; }
+
+  .model-name {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .model-badge {
+    font-size: 10px;
+    font-weight: 400;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(96,165,250,0.1);
+    color: var(--service);
+  }
+
+  .model-field {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  .model-field:last-child { border: none; }
+
+  .field-name { color: var(--text); font-weight: 500; }
+  .field-type { color: var(--text-dim); font-size: 11px; }
+  .field-optional { color: var(--text-muted); font-size: 10px; }
+
+  .model-arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding-top: 40px;
+    color: var(--arrow);
+    font-family: var(--font-mono);
+    font-size: 10px;
+  }
+
+  .model-arrow svg {
+    width: 32px;
+    height: 32px;
+  }
+
+  .nested-model {
+    margin-top: 8px;
+    margin-left: 12px;
+    padding: 10px 14px;
+    background: var(--elevated);
+    border: 1px solid var(--elevated-border);
+    border-radius: 8px;
+  }
+
+  .nested-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--vector);
+    margin-bottom: 6px;
+  }
+
+  /* ── Legend ── */
+  .legend {
+    display: flex;
+    gap: 24px;
+    margin-top: 40px;
+    flex-wrap: wrap;
+    justify-content: center;
+    animation: fadeUp 0.7s ease 0.4s both;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+  }
+
+  .legend-dot.ingest { background: var(--ingest); }
+  .legend-dot.rag { background: var(--rag); }
+  .legend-dot.service { background: var(--service); }
+  .legend-dot.llm { background: var(--llm); }
+  .legend-dot.vector { background: var(--vector); }
+
+  @keyframes fadeDown {
+    from { opacity: 0; transform: translateY(-12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (max-width: 900px) {
+    body { padding: 24px 16px; }
+    .rag-steps { grid-template-columns: 1fr; }
+    .rag-step:not(:last-child)::after { display: none; }
+    .models-grid { grid-template-columns: 1fr; }
+    .model-arrow { flex-direction: row; padding-top: 0; }
+    .pipeline { flex-direction: column; }
+    .step-arrow { transform: rotate(90deg); width: auto; height: 32px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <div class="title-block">
+    <div class="title-label">PDF RAG Chatbot</div>
+    <div class="title-main"><strong>Application</strong> Topology</div>
+    <div class="title-sub">Ingestion Pipeline &middot; RAG Query Flow &middot; Data Models</div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- SECTION 1: Ingestion Pipeline                                     -->
+  <!-- ================================================================= -->
+  <div class="section ingest-section">
+    <div class="section-header">
+      <div class="section-number">1</div>
+      <div class="section-title">Ingestion Pipeline</div>
+      <div class="section-desc">K8s Job &middot; runs once &middot; services/ingestion/</div>
+    </div>
+
+    <div class="pipeline">
+      <div class="pipeline-step">
+        <div class="step-card">
+          <div class="step-num">Step 1</div>
+          <div class="step-name">Parse</div>
+          <div class="step-file">pdf_parser.py</div>
+          <div class="step-detail">
+            PyMuPDF extracts text as Markdown, one document per page.
+            <br><br>
+            Input: PDF files from PVC mount (/data)
+          </div>
+        </div>
+      </div>
+
+      <div class="step-arrow">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        <div class="data-label">pages[]</div>
+      </div>
+
+      <div class="pipeline-step">
+        <div class="step-card">
+          <div class="step-num">Step 2</div>
+          <div class="step-name">Chunk</div>
+          <div class="step-file">chunker.py</div>
+          <div class="step-detail">
+            Split into 512-token windows with 50-token overlap using tiktoken (cl100k_base).
+          </div>
+        </div>
+      </div>
+
+      <div class="step-arrow">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        <div class="data-label">chunks[]</div>
+      </div>
+
+      <div class="pipeline-step">
+        <div class="step-card">
+          <div class="step-num">Step 3</div>
+          <div class="step-name">Embed</div>
+          <div class="step-file">embedder.py</div>
+          <div class="step-detail">
+            Nomic V1.5 via Embedding Server (:8080/embed).
+            <br><br>
+            Prefix: "search_document: "
+            <br>
+            Output: 768-dim vectors
+          </div>
+        </div>
+      </div>
+
+      <div class="step-arrow">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        <div class="data-label">vectors[]</div>
+      </div>
+
+      <div class="pipeline-step">
+        <div class="step-card">
+          <div class="step-num">Step 4</div>
+          <div class="step-name">Store</div>
+          <div class="step-file">vector_store.py</div>
+          <div class="step-detail">
+            Upsert into Qdrant (:6333).
+            <br><br>
+            Collection: pdf_chunks
+            <br>
+            Cosine distance, HNSW index
+            <br>
+            Deterministic UUIDs (idempotent)
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- SECTION 2: RAG Query Flow                                         -->
+  <!-- ================================================================= -->
+  <div class="section rag-section">
+    <div class="section-header">
+      <div class="section-number">2</div>
+      <div class="section-title">RAG Query Flow</div>
+      <div class="section-desc">Per user request &middot; services/chat-api/</div>
+    </div>
+
+    <div class="rag-flow">
+      <!-- Input -->
+      <div class="io-bar input">
+        <div class="io-icon">&#128100;</div>
+        <div>
+          <div class="io-label">User Request</div>
+          <div class="io-detail">POST /chat &nbsp;&mdash;&nbsp; {question, history?}</div>
+        </div>
+        <div class="io-arrow">&darr;</div>
+      </div>
+
+      <!-- RAG pipeline wrapper -->
+      <div class="rag-wrapper">
+        <div class="rag-wrapper-label">Chat API &mdash; rag_pipeline.py</div>
+
+        <div class="rag-steps">
+          <div class="rag-step">
+            <div class="rag-step-num">1</div>
+            <div class="rag-step-name">Embed</div>
+            <div class="rag-step-target">embedding:8080</div>
+            <div class="rag-step-detail">
+              Convert question to 768-dim vector.
+              Prefix: "search_query: "
+            </div>
+            <div class="rag-step-latency">~10-50ms</div>
+          </div>
+
+          <div class="rag-step">
+            <div class="rag-step-num">2</div>
+            <div class="rag-step-name">Search</div>
+            <div class="rag-step-target">qdrant:6333</div>
+            <div class="rag-step-detail">
+              Cosine similarity search. Returns top_k=5 most relevant chunks.
+            </div>
+            <div class="rag-step-latency">~5-50ms</div>
+          </div>
+
+          <div class="rag-step">
+            <div class="rag-step-num">3</div>
+            <div class="rag-step-name">Build Prompt</div>
+            <div class="rag-step-target">in-memory</div>
+            <div class="rag-step-detail">
+              System instructions + retrieved chunks + conversation history + question.
+            </div>
+            <div class="rag-step-latency">&lt;1ms</div>
+          </div>
+
+          <div class="rag-step">
+            <div class="rag-step-num">4</div>
+            <div class="rag-step-name">Generate</div>
+            <div class="rag-step-target">vllm:8000</div>
+            <div class="rag-step-detail">
+              /v1/chat/completions
+              temp=0.1, max_tokens=1024
+              Llama 3.1 8B AWQ INT4
+            </div>
+            <div class="rag-step-latency">~1-10s (GPU)</div>
+          </div>
+
+          <div class="rag-step">
+            <div class="rag-step-num">5</div>
+            <div class="rag-step-name">Package</div>
+            <div class="rag-step-target">response</div>
+            <div class="rag-step-detail">
+              Bundle answer + source citations (text, page, score) as ChatResponse.
+            </div>
+            <div class="rag-step-latency">&lt;1ms</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Output -->
+      <div class="io-bar output">
+        <div class="io-icon">&#9989;</div>
+        <div>
+          <div class="io-label">ChatResponse</div>
+          <div class="io-detail">{answer, sources[], model, chunks_retrieved}</div>
+        </div>
+        <div class="io-arrow">&uarr;</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- SECTION 3: Data Models                                            -->
+  <!-- ================================================================= -->
+  <div class="section models-section">
+    <div class="section-header">
+      <div class="section-number">3</div>
+      <div class="section-title">Pydantic Data Models</div>
+      <div class="section-desc">Request / Response contracts &middot; models.py</div>
+    </div>
+
+    <div class="models-grid">
+      <!-- ChatRequest -->
+      <div class="model-card">
+        <div class="model-name">
+          ChatRequest
+          <span class="model-badge">POST /chat</span>
+        </div>
+        <div class="model-field">
+          <span class="field-name">question</span>
+          <span class="field-type">str</span>
+        </div>
+        <div class="model-field">
+          <span class="field-name">session_id</span>
+          <span class="field-type">str | None</span>
+          <span class="field-optional">optional</span>
+        </div>
+        <div class="model-field">
+          <span class="field-name">history</span>
+          <span class="field-type">list[dict] | None</span>
+          <span class="field-optional">optional</span>
+        </div>
+      </div>
+
+      <!-- Arrow -->
+      <div class="model-arrow">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <line x1="5" y1="12" x2="19" y2="12"/>
+          <polyline points="14 7 19 12 14 17"/>
+        </svg>
+        <span>RAG Pipeline</span>
+      </div>
+
+      <!-- ChatResponse -->
+      <div class="model-card">
+        <div class="model-name">
+          ChatResponse
+          <span class="model-badge">200 OK</span>
+        </div>
+        <div class="model-field">
+          <span class="field-name">answer</span>
+          <span class="field-type">str</span>
+        </div>
+        <div class="model-field">
+          <span class="field-name">sources</span>
+          <span class="field-type">list[Source]</span>
+        </div>
+        <div class="nested-model">
+          <div class="nested-label">Source</div>
+          <div class="model-field">
+            <span class="field-name">text</span>
+            <span class="field-type">str</span>
+          </div>
+          <div class="model-field">
+            <span class="field-name">page_number</span>
+            <span class="field-type">int</span>
+          </div>
+          <div class="model-field">
+            <span class="field-name">source</span>
+            <span class="field-type">str</span>
+          </div>
+          <div class="model-field">
+            <span class="field-name">score</span>
+            <span class="field-type">float</span>
+          </div>
+        </div>
+        <div class="model-field">
+          <span class="field-name">model</span>
+          <span class="field-type">str</span>
+        </div>
+        <div class="model-field">
+          <span class="field-name">chunks_retrieved</span>
+          <span class="field-type">int</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot ingest"></div>Ingestion Pipeline</div>
+  <div class="legend-item"><div class="legend-dot service"></div>Embedding Service</div>
+  <div class="legend-item"><div class="legend-dot vector"></div>Vector Database</div>
+  <div class="legend-item"><div class="legend-dot rag"></div>RAG Orchestration</div>
+  <div class="legend-item"><div class="legend-dot llm"></div>LLM Inference</div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,47 @@
+# =============================================================================
+# PDF DATA -- PersistentVolumeClaim
+# =============================================================================
+# WHAT IS A PVC?
+# A PersistentVolumeClaim (PVC) is a request for storage. Kubernetes finds
+# (or creates) a PersistentVolume (PV) that satisfies the request and binds
+# them together. Think of it like ordering storage from a catalog -- you
+# specify how much you need and what type, and Kubernetes provisions it.
+#
+# WHY A PVC FOR PDF DATA?
+# The ingestion job needs to read PDF files from somewhere. Options include:
+# - S3 bucket (production approach -- download at runtime)
+# - ConfigMap (limited to 1MB, not suitable for PDFs)
+# - PVC (good for development -- manually copy files in, persistent across jobs)
+#
+# We use a PVC here so you can manually copy PDFs into it and
+# re-run the ingestion job without re-uploading.
+#
+# HOW TO LOAD PDFs INTO THIS PVC:
+# 1. Create a temporary pod that mounts the PVC:
+#      kubectl run pdf-loader --image=busybox --restart=Never \
+#        --overrides='{"spec":{"containers":[{"name":"pdf-loader","image":"busybox","command":["sleep","3600"],"volumeMounts":[{"name":"pdf-data","mountPath":"/data"}]}],"volumes":[{"name":"pdf-data","persistentVolumeClaim":{"claimName":"pdf-data"}}]}}' \
+#        -n pdf-rag-chatbot
+#
+# 2. Copy your PDF into the pod:
+#      kubectl cp my-document.pdf pdf-rag-chatbot/pdf-loader:/data/my-document.pdf
+#
+# 3. Delete the temporary pod:
+#      kubectl delete pod pdf-loader -n pdf-rag-chatbot
+#
+# 4. Run the ingestion job (it mounts the same PVC).
+# =============================================================================
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pdf-data
+  namespace: pdf-rag-chatbot
+  labels:
+    project: pdf-rag-chatbot
+spec:
+  accessModes:
+    - ReadWriteOnce              # Can be mounted read-write by a single node
+  storageClassName: gp2          # EKS default storage class (gp3 requires manual StorageClass creation)
+  resources:
+    requests:
+      storage: 1Gi               # 1GB is plenty for PDF files

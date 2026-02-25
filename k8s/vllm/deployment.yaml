@@ -1,0 +1,242 @@
+# =============================================================================
+# vLLM -- Large Language Model Server (GPU Workload)
+# =============================================================================
+# WHAT IS vLLM?
+# vLLM is a high-performance inference engine for large language models.
+# It serves LLMs with an OpenAI-compatible API, so our chat-api can call
+# it the same way you'd call the OpenAI API (POST /v1/chat/completions).
+#
+# WHY vLLM?
+# 1. PagedAttention: vLLM's killer feature. It manages GPU memory like a
+#    computer's virtual memory system, allowing it to serve more concurrent
+#    requests than naive implementations. Without this, each request would
+#    reserve the maximum possible memory upfront, wasting GPU RAM.
+# 2. Continuous batching: Groups multiple requests into a single GPU
+#    operation for higher throughput.
+# 3. OpenAI-compatible API: Drop-in replacement -- no custom client code needed.
+# 4. Large community and active development.
+#
+# WHAT IS AWQ QUANTIZATION?
+# The full Llama 3.1 8B model uses 16GB of GPU memory (FP16 precision).
+# AWQ (Activation-aware Weight Quantization) compresses the model to ~4GB
+# by storing weights as 4-bit integers instead of 16-bit floats.
+#
+# awq_marlin is vLLM's optimized AWQ kernel that's 2-3x faster than the
+# default AWQ implementation. It uses NVIDIA's Marlin GPU kernels.
+#
+# This lets us run an 8B parameter model on a single T4 GPU (16GB) with
+# room for KV cache (the memory used to track conversation context).
+#
+# GPU MEMORY BUDGET (g4dn.xlarge with T4 16GB):
+# - Model weights (AWQ INT4): ~4.5GB
+# - KV cache (conversation context): ~10GB (controlled by gpu-memory-utilization)
+# - CUDA overhead: ~1.5GB
+# Total: ~16GB (fully utilizing the T4)
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: pdf-rag-chatbot
+  labels:
+    app: vllm
+    project: pdf-rag-chatbot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm
+
+  # -------------------------------------------------------------------------
+  # STRATEGY: Recreate (not RollingUpdate)
+  # -------------------------------------------------------------------------
+  # GPUs are exclusive resources -- only one pod can hold a GPU at a time.
+  # The default RollingUpdate strategy creates the new pod BEFORE killing
+  # the old one, but the new pod can't schedule without a free GPU.
+  # Result: deadlock (old pod won't die until new pod is Ready, new pod
+  # can't start until old pod releases the GPU).
+  #
+  # Recreate kills the old pod first, freeing the GPU, then creates the
+  # new one. This causes a brief outage during updates, but avoids the
+  # deadlock. Acceptable for a single-GPU inference server.
+  # -------------------------------------------------------------------------
+  strategy:
+    type: Recreate
+
+  template:
+    metadata:
+      labels:
+        app: vllm
+        project: pdf-rag-chatbot
+    spec:
+      # -----------------------------------------------------------------------
+      # NODE SELECTOR -- Schedule on GPU nodes only.
+      # -----------------------------------------------------------------------
+      # Our EKS cluster labels GPU nodes (g4dn.xlarge) with "workload: gpu".
+      # This ensures vLLM lands on a node with an NVIDIA T4 GPU.
+      # -----------------------------------------------------------------------
+      nodeSelector:
+        workload: gpu
+
+      # -----------------------------------------------------------------------
+      # TOLERATIONS -- Allow scheduling on GPU-tainted nodes.
+      # -----------------------------------------------------------------------
+      # THIS IS CRITICAL and a common source of "Pod stuck in Pending" issues!
+      #
+      # GPU nodes in EKS are "tainted" with nvidia.com/gpu:NoSchedule.
+      # A taint is like a "keep out" sign -- it prevents pods from being
+      # scheduled on the node UNLESS the pod has a matching "toleration."
+      #
+      # WHY TAINTS EXIST:
+      # GPU nodes are expensive ($0.526/hr for g4dn.xlarge). Taints prevent
+      # non-GPU workloads (like nginx or postgres) from accidentally landing
+      # on GPU nodes and wasting expensive resources.
+      #
+      # HOW IT WORKS:
+      # - Node has taint:      nvidia.com/gpu:NoSchedule
+      # - Pod has toleration:  "I tolerate nvidia.com/gpu:NoSchedule"
+      # - Kubernetes: "OK, this pod is allowed on the GPU node"
+      #
+      # Without this toleration, the pod sits in Pending forever with the
+      # event: "0/N nodes are available: N node(s) had untolerated taint"
+      # -----------------------------------------------------------------------
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+
+      containers:
+        - name: vllm
+          # -----------------------------------------------------------------
+          # vLLM's official Docker image includes CUDA, PyTorch, and the
+          # vLLM engine. The "openai" variant includes the OpenAI-compatible
+          # API server out of the box.
+          # -----------------------------------------------------------------
+          image: vllm/vllm-openai:latest
+
+          # -----------------------------------------------------------------
+          # ARGS -- vLLM server configuration
+          # -----------------------------------------------------------------
+          # --model: HuggingFace model ID. vLLM downloads it on first start.
+          #
+          # --quantization awq_marlin: Use the fast Marlin kernel for AWQ
+          #   quantized models. 2-3x faster than default AWQ decoding.
+          #
+          # --max-model-len 8192: Maximum sequence length (input + output).
+          #   Llama 3.1 supports 128K, but we cap at 8K to save GPU memory.
+          #   For RAG, 8K is plenty: ~5K for retrieved context + ~2K for
+          #   the question/prompt + ~1K for the answer.
+          #
+          # --gpu-memory-utilization 0.90: Tell vLLM to use 90% of GPU RAM
+          #   for model weights + KV cache. The remaining 10% is headroom
+          #   for CUDA overhead and spikes. Setting this too high (>0.95)
+          #   causes OOM errors; too low wastes expensive GPU memory.
+          # -----------------------------------------------------------------
+          args:
+            - "--model"
+            - "hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4"
+            - "--quantization"
+            - "awq_marlin"
+            - "--max-model-len"
+            - "8192"
+            - "--gpu-memory-utilization"
+            - "0.90"
+
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+
+          # -----------------------------------------------------------------
+          # ENVIRONMENT VARIABLES
+          # -----------------------------------------------------------------
+          env:
+            # -----------------------------------------------------------------
+            # KUBERNETES SERVICE DISCOVERY COLLISION FIX
+            # -----------------------------------------------------------------
+            # Kubernetes auto-injects env vars for every Service in the
+            # namespace. Because our Service is named "vllm", Kubernetes
+            # creates VLLM_PORT=tcp://172.20.x.x:8000 (a URI).
+            #
+            # But vLLM the software reads VLLM_PORT expecting a plain port
+            # NUMBER (like 8000). When it gets a URI instead, it crashes:
+            #   ValueError: VLLM_PORT 'tcp://...' appears to be a URI
+            #
+            # Fix: Explicitly set VLLM_PORT to override the K8s-injected
+            # value. This is a known issue documented by vLLM:
+            # https://docs.vllm.ai/en/stable/serving/env_vars.html
+            # -----------------------------------------------------------------
+            - name: VLLM_PORT
+              value: "8000"
+
+            # HuggingFace token for downloading gated models.
+            # Llama 3.1 requires accepting Meta's license agreement on
+            # huggingface.co before you can download the weights.
+            # If the model is not gated, this is harmlessly ignored.
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: rag-secrets
+                  key: HF_TOKEN
+                  optional: true       # Don't fail if HF_TOKEN isn't set
+
+          # -----------------------------------------------------------------
+          # RESOURCES -- GPU + CPU + Memory
+          # -----------------------------------------------------------------
+          # nvidia.com/gpu: 1 -- This is the magic line!
+          #
+          # HOW GPU SCHEDULING WORKS IN KUBERNETES:
+          # 1. The NVIDIA Device Plugin (a DaemonSet) runs on each GPU node
+          #    and registers available GPUs with the Kubernetes scheduler.
+          # 2. When a pod requests "nvidia.com/gpu: 1", the scheduler finds
+          #    a node with an available GPU and assigns it to the pod.
+          # 3. The device plugin mounts the GPU device (/dev/nvidia0) and
+          #    CUDA libraries into the container automatically.
+          # 4. GPUs are exclusive -- if a node has 1 GPU and it's assigned,
+          #    no other pods can use it (unlike CPU/memory which are shared).
+          #
+          # IMPORTANT: GPU requests MUST equal limits. You can't request 0.5
+          # of a GPU -- it's all or nothing (without MIG/time-slicing).
+          #
+          # Memory: 8Gi is for the Python process and framework overhead.
+          # The actual model weights live in GPU memory (VRAM), which is
+          # managed by the nvidia.com/gpu resource, not the memory field.
+          # -----------------------------------------------------------------
+          resources:
+            requests:
+              nvidia.com/gpu: 1
+              memory: "8Gi"
+              cpu: "2000m"
+            limits:
+              nvidia.com/gpu: 1
+              memory: "8Gi"
+              cpu: "2000m"
+
+          # -----------------------------------------------------------------
+          # READINESS PROBE
+          # -----------------------------------------------------------------
+          # vLLM exposes /health which returns 200 when the model is loaded
+          # and the server is ready to accept inference requests.
+          #
+          # WHY SUCH GENEROUS TIMEOUTS?
+          # Model loading is slow:
+          # 1. First start: Download model from HuggingFace (~4.5GB for AWQ)
+          #    This can take 2-5 minutes depending on network speed.
+          # 2. Subsequent starts: Load from disk cache (~1-2 minutes).
+          # 3. GPU initialization: CUDA context setup, model compilation.
+          #
+          # initialDelaySeconds: 120 -- Wait 2 minutes before first check.
+          # periodSeconds: 15       -- Check every 15 seconds.
+          # failureThreshold: 20    -- Allow 20 failures = 5 more minutes.
+          #
+          # Total patience: 120s + (20 * 15s) = 420s = 7 minutes.
+          # This covers even cold starts with slow network connections.
+          # -----------------------------------------------------------------
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 120
+            periodSeconds: 15
+            failureThreshold: 20

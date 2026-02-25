@@ -1,0 +1,110 @@
+# =============================================================================
+# CONFIGMAP -- Centralized Non-Secret Configuration
+# =============================================================================
+# A ConfigMap stores configuration data as key-value pairs. Pods reference it
+# to load environment variables without hardcoding values into container images.
+#
+# WHY a single ConfigMap?
+# All our services (chat-api, ingestion) need overlapping config (Qdrant host,
+# embedding URL, etc.). A single ConfigMap avoids duplication. Each pod uses
+# "envFrom: configMapRef" to inject ALL these keys as environment variables.
+#
+# IMPORTANT: Never put passwords, tokens, or credentials here. Those go in
+# Secrets (see secrets.yaml). ConfigMaps are stored in plain text in etcd.
+# =============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-config
+  namespace: pdf-rag-chatbot
+  labels:
+    project: pdf-rag-chatbot
+data:
+  # ---------------------------------------------------------------------------
+  # Qdrant -- Vector Database
+  # ---------------------------------------------------------------------------
+  # Qdrant stores document chunks as high-dimensional vectors (embeddings).
+  # When a user asks a question, we embed the question and search Qdrant for
+  # the most similar vectors -- this is "semantic search."
+  #
+  # The hostname "qdrant" resolves via Kubernetes DNS to the Qdrant Service,
+  # which routes traffic to the Qdrant pod. No IP addresses needed.
+  # ---------------------------------------------------------------------------
+  QDRANT_HOST: "qdrant"
+  QDRANT_PORT: "6333"                  # HTTP API port (6334 is gRPC)
+  QDRANT_COLLECTION: "pdf_chunks"      # Collection name (like a database table)
+
+  # ---------------------------------------------------------------------------
+  # Embedding Server (Text Embeddings Inference)
+  # ---------------------------------------------------------------------------
+  # The embedding model converts text into vectors (arrays of 768 numbers).
+  # Both the ingestion service (to embed document chunks) and the chat API
+  # (to embed user questions) call this endpoint.
+  # ---------------------------------------------------------------------------
+  EMBEDDING_URL: "http://embedding:8080"
+  EMBEDDING_DIMENSION: "768"           # Nomic Embed v1.5 outputs 768-dim vectors
+  EMBEDDING_BATCH_SIZE: "32"           # How many chunks to embed in one API call
+
+  # ---------------------------------------------------------------------------
+  # vLLM -- Large Language Model Server
+  # ---------------------------------------------------------------------------
+  # vLLM serves the Llama 3.1 8B model with an OpenAI-compatible API.
+  # The chat API sends a prompt (user question + retrieved context) to vLLM
+  # and gets back a natural language answer.
+  # ---------------------------------------------------------------------------
+  VLLM_URL: "http://vllm:8000"
+  VLLM_MODEL: "hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4"
+
+  # ---------------------------------------------------------------------------
+  # RAG Pipeline Parameters
+  # ---------------------------------------------------------------------------
+  # These control how the retrieval-augmented generation pipeline behaves:
+  #
+  # TOP_K: Number of document chunks to retrieve from Qdrant. More chunks =
+  #        more context for the LLM, but also more tokens and slower responses.
+  #
+  # TEMPERATURE: Controls LLM randomness (0.0 = deterministic, 1.0 = creative).
+  #              Low temperature (0.1) keeps answers factual and consistent.
+  #
+  # MAX_TOKENS: Maximum length of the LLM's response in tokens (~0.75 words each).
+  #             1024 tokens is roughly 750 words -- enough for detailed answers.
+  # ---------------------------------------------------------------------------
+  RAG_TOP_K: "5"
+  RAG_TEMPERATURE: "0.1"
+  RAG_MAX_TOKENS: "1024"
+
+  # ---------------------------------------------------------------------------
+  # Chunking Parameters
+  # ---------------------------------------------------------------------------
+  # Documents are split into overlapping chunks before embedding. This is
+  # because embedding models have a limited context window and work better
+  # with focused passages than entire documents.
+  #
+  # CHUNK_SIZE: Number of tokens per chunk. 512 is a sweet spot -- large
+  #             enough for meaningful context, small enough for precise retrieval.
+  #
+  # CHUNK_OVERLAP: Tokens shared between adjacent chunks. Overlap prevents
+  #                information loss at chunk boundaries (e.g., a sentence
+  #                split across two chunks).
+  # ---------------------------------------------------------------------------
+  CHUNK_SIZE: "512"
+  CHUNK_OVERLAP: "50"
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL -- Application Database
+  # ---------------------------------------------------------------------------
+  # Stores application data: conversation history, ingestion logs, document
+  # metadata. Vectors go in Qdrant; everything else goes in PostgreSQL.
+  # ---------------------------------------------------------------------------
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "ragchat"
+
+  # ---------------------------------------------------------------------------
+  # PDF Configuration
+  # ---------------------------------------------------------------------------
+  # Directory where the ingestion service looks for PDF files to process.
+  # This maps to a volume mount inside the ingestion pod.
+  # ---------------------------------------------------------------------------
+  PDF_DIRECTORY: "/data"

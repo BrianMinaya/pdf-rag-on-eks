@@ -1,0 +1,143 @@
+# =============================================================================
+# INGESTION JOB -- PDF Processing Pipeline
+# =============================================================================
+# WHAT IS A KUBERNETES JOB?
+# A Job runs a container to completion and then stops. This is different from
+# a Deployment, which runs containers forever (restarting them if they crash).
+#
+# Think of it this way:
+# - Deployment = a web server that should always be running
+# - Job = a batch task that starts, does its work, and exits
+#
+# Our ingestion pipeline is a Job because it:
+# 1. Reads PDF files from the /data volume
+# 2. Extracts text from each PDF
+# 3. Splits text into chunks (512 tokens with 50 token overlap)
+# 4. Embeds each chunk using the embedding service (Nomic Embed v1.5)
+# 5. Stores the vectors in Qdrant with metadata (filename, page number)
+# 6. Exits when all PDFs are processed
+#
+# To re-run the job (e.g., after adding new PDFs):
+#   kubectl delete job ingestion -n pdf-rag-chatbot
+#   kubectl apply -f ingestion/job.yaml
+#
+# Jobs can't be "re-applied" -- you must delete the old one first.
+# Alternatively, use a unique name each time (e.g., ingestion-20240115).
+#
+# WHY restartPolicy: Never?
+# Jobs support two restart policies:
+# - Never:     If the container fails, DON'T restart it. Create a new pod instead.
+#              The failed pod's logs are preserved for debugging.
+# - OnFailure: If the container fails, restart it IN THE SAME pod.
+#              Logs from previous attempts are lost.
+#
+# We use "Never" so we can inspect logs from failed attempts:
+#   kubectl logs ingestion-xxxxx -n pdf-rag-chatbot
+# =============================================================================
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ingestion
+  namespace: pdf-rag-chatbot
+  labels:
+    app: ingestion
+    project: pdf-rag-chatbot
+spec:
+  # ---------------------------------------------------------------------------
+  # backoffLimit controls how many times Kubernetes retries the job before
+  # marking it as failed. With backoffLimit: 2, Kubernetes will:
+  #   Attempt 1: Run the job
+  #   Attempt 2: If attempt 1 failed, try again
+  #   Attempt 3: If attempt 2 failed, try one more time
+  #   Then: Mark the job as Failed
+  #
+  # Each retry uses exponential backoff (10s, 20s, 40s...) to avoid
+  # hammering a dependency that might be temporarily down.
+  # ---------------------------------------------------------------------------
+  backoffLimit: 2
+
+  template:
+    metadata:
+      labels:
+        app: ingestion
+        project: pdf-rag-chatbot
+    spec:
+      # -----------------------------------------------------------------------
+      # restartPolicy: Never -- See explanation in the header above.
+      # This is REQUIRED for Jobs. Deployments use "Always" (the default),
+      # but Jobs must use either "Never" or "OnFailure".
+      # -----------------------------------------------------------------------
+      restartPolicy: Never
+
+      nodeSelector:
+        workload: cpu
+
+      containers:
+        - name: ingestion
+          # -----------------------------------------------------------------
+          # CONTAINER IMAGE
+          # -----------------------------------------------------------------
+          # TODO: Replace ACCOUNT_ID with your AWS account ID.
+          # This image is built from the ingestion service code and pushed
+          # to Amazon ECR (Elastic Container Registry).
+          #
+          # Example: 123456789012.dkr.ecr.us-east-1.amazonaws.com/pdf-rag-chatbot/ingestion:latest
+          # -----------------------------------------------------------------
+          image: <YOUR_AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/pdf-rag-chatbot/ingestion:latest
+          imagePullPolicy: Always
+
+          # -----------------------------------------------------------------
+          # ENVIRONMENT VARIABLES -- Bulk injection from ConfigMap and Secret
+          # -----------------------------------------------------------------
+          # The ingestion service needs:
+          # - QDRANT_HOST/PORT/COLLECTION: Where to store vectors
+          # - EMBEDDING_URL: Where to embed text chunks
+          # - CHUNK_SIZE/CHUNK_OVERLAP: How to split documents
+          # - PDF_DIRECTORY: Where to find PDF files (/data)
+          # - POSTGRES_*: For logging ingestion metadata
+          # -----------------------------------------------------------------
+          envFrom:
+            - configMapRef:
+                name: rag-config
+            - secretRef:
+                name: rag-secrets
+
+          resources:
+            # Ingestion is more resource-intensive than the chat API because
+            # it processes entire documents: PDF parsing, text extraction,
+            # chunking, and batch embedding calls. 1Gi memory handles large
+            # PDFs with many pages.
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+
+          # -----------------------------------------------------------------
+          # VOLUME MOUNT -- PDF data directory
+          # -----------------------------------------------------------------
+          # Mount the PVC containing PDF files at /data, which matches the
+          # PDF_DIRECTORY env var from the ConfigMap.
+          # -----------------------------------------------------------------
+          volumeMounts:
+            - name: pdf-data
+              mountPath: /data
+              readOnly: true           # Ingestion only reads PDFs, never writes
+
+      # -----------------------------------------------------------------------
+      # VOLUMES
+      # -----------------------------------------------------------------------
+      # Reference the PVC created by pvc.yaml. This PVC contains the PDF
+      # files that were manually uploaded (see pvc.yaml for instructions).
+      #
+      # In production, you would likely replace this with:
+      # - An S3 volume (using s3-csi-driver or an init container with aws cli)
+      # - A shared EFS volume for team access
+      # - An init container that downloads from a known S3 path
+      # -----------------------------------------------------------------------
+      volumes:
+        - name: pdf-data
+          persistentVolumeClaim:
+            claimName: pdf-data

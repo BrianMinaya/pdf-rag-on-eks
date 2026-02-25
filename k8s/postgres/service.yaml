@@ -1,0 +1,27 @@
+# =============================================================================
+# POSTGRESQL SERVICE
+# =============================================================================
+# ClusterIP Service for PostgreSQL. Other pods connect via:
+#   postgres://ragchat:password@postgres:5432/ragchat
+#
+# The hostname "postgres" resolves to this Service's ClusterIP address.
+# See the Qdrant service.yaml for a detailed explanation of Services.
+# =============================================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: pdf-rag-chatbot
+  labels:
+    app: postgres
+    project: pdf-rag-chatbot
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP

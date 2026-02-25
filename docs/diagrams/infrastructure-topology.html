@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Infrastructure Topology -- PDF RAG Chatbot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0c0e12;
+    --bg-grid: #12151b;
+    --surface: #161a22;
+    --surface-border: #242a36;
+    --elevated: #1c2130;
+    --elevated-border: #2e3648;
+    --text: #d4dae6;
+    --text-dim: #6b7a94;
+    --text-muted: #3d4a60;
+    --accent-aws: #f59e0b;
+    --accent-aws-dim: rgba(245, 158, 11, 0.08);
+    --accent-aws-border: rgba(245, 158, 11, 0.25);
+    --accent-cpu: #34d399;
+    --accent-cpu-dim: rgba(52, 211, 153, 0.06);
+    --accent-cpu-border: rgba(52, 211, 153, 0.2);
+    --accent-gpu: #f472b6;
+    --accent-gpu-dim: rgba(244, 114, 182, 0.06);
+    --accent-gpu-border: rgba(244, 114, 182, 0.2);
+    --accent-ecr: #60a5fa;
+    --accent-ecr-dim: rgba(96, 165, 250, 0.06);
+    --accent-ecr-border: rgba(96, 165, 250, 0.2);
+    --accent-eks: #a78bfa;
+    --accent-eks-dim: rgba(167, 139, 250, 0.06);
+    --accent-eks-border: rgba(167, 139, 250, 0.2);
+    --font-mono: 'JetBrains Mono', monospace;
+    --font-body: 'Outfit', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 48px 32px;
+    /* Subtle grid background */
+    background-image:
+      linear-gradient(var(--bg-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+    background-size: 40px 40px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Title ── */
+  .title-block {
+    text-align: center;
+    margin-bottom: 48px;
+    animation: fadeDown 0.6s ease;
+  }
+
+  .title-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent-aws);
+    margin-bottom: 12px;
+  }
+
+  .title-main {
+    font-size: 32px;
+    font-weight: 300;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    line-height: 1.2;
+  }
+
+  .title-main strong { font-weight: 600; }
+
+  .title-sub {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-top: 10px;
+  }
+
+  /* ── Diagram canvas ── */
+  .canvas {
+    width: 100%;
+    max-width: 1100px;
+    position: relative;
+    animation: fadeUp 0.7s ease 0.1s both;
+  }
+
+  /* ── Region container ── */
+  .region {
+    border: 1px solid var(--accent-aws-border);
+    border-radius: 16px;
+    background: var(--accent-aws-dim);
+    padding: 20px;
+    position: relative;
+  }
+
+  .region-label {
+    position: absolute;
+    top: -10px;
+    left: 24px;
+    background: var(--bg);
+    padding: 0 12px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent-aws);
+    letter-spacing: 0.05em;
+  }
+
+  /* ── VPC container ── */
+  .vpc {
+    border: 1px solid var(--surface-border);
+    border-radius: 12px;
+    background: var(--surface);
+    padding: 20px;
+    position: relative;
+    margin-top: 8px;
+  }
+
+  .vpc-label {
+    position: absolute;
+    top: -10px;
+    left: 20px;
+    background: var(--surface);
+    padding: 0 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-dim);
+  }
+
+  /* ── Layout grid ── */
+  .top-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  .node-groups {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  /* ── EKS control plane ── */
+  .control-plane {
+    border: 1px solid var(--accent-eks-border);
+    border-radius: 10px;
+    background: var(--accent-eks-dim);
+    padding: 16px 20px;
+    position: relative;
+  }
+
+  .control-plane-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent-eks);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .control-plane-label .badge {
+    font-size: 10px;
+    font-weight: 400;
+    background: rgba(167,139,250,0.12);
+    color: var(--accent-eks);
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .cp-components {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .cp-chip {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    background: rgba(167,139,250,0.06);
+    border: 1px solid rgba(167,139,250,0.12);
+    padding: 4px 10px;
+    border-radius: 6px;
+  }
+
+  /* ── ECR sidebar ── */
+  .ecr-block {
+    border: 1px solid var(--accent-ecr-border);
+    border-radius: 10px;
+    background: var(--accent-ecr-dim);
+    padding: 16px 20px;
+    min-width: 160px;
+  }
+
+  .ecr-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent-ecr);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  .ecr-repo {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(96,165,250,0.08);
+  }
+
+  .ecr-repo:last-child { border: none; }
+
+  /* ── Node group boxes ── */
+  .node-group {
+    border-radius: 10px;
+    padding: 16px 20px;
+    position: relative;
+  }
+
+  .node-group.cpu {
+    border: 1px solid var(--accent-cpu-border);
+    background: var(--accent-cpu-dim);
+  }
+
+  .node-group.gpu {
+    border: 1px solid var(--accent-gpu-border);
+    background: var(--accent-gpu-dim);
+  }
+
+  .ng-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .ng-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .cpu .ng-label { color: var(--accent-cpu); }
+  .gpu .ng-label { color: var(--accent-gpu); }
+
+  .ng-specs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .spec-tag {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.02em;
+  }
+
+  .cpu .spec-tag {
+    background: rgba(52,211,153,0.08);
+    color: rgba(52,211,153,0.7);
+    border: 1px solid rgba(52,211,153,0.12);
+  }
+
+  .gpu .spec-tag {
+    background: rgba(244,114,182,0.08);
+    color: rgba(244,114,182,0.7);
+    border: 1px solid rgba(244,114,182,0.12);
+  }
+
+  /* ── Pod cards ── */
+  .pods {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .pods.single { grid-template-columns: 1fr; }
+
+  .pod {
+    background: var(--elevated);
+    border: 1px solid var(--elevated-border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    transition: border-color 0.2s;
+  }
+
+  .pod:hover { border-color: #4a5672; }
+
+  .pod-name {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+
+  .pod-detail {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+
+  .pod.has-storage {
+    border-bottom: 2px solid var(--text-muted);
+  }
+
+  .storage-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    padding: 2px 7px;
+    border-radius: 4px;
+    margin-top: 4px;
+  }
+
+  .storage-badge::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    background: var(--text-muted);
+    border-radius: 2px;
+  }
+
+  .taint-badge {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--accent-gpu);
+    background: rgba(244,114,182,0.08);
+    border: 1px solid rgba(244,114,182,0.15);
+    padding: 4px 10px;
+    border-radius: 6px;
+    margin-bottom: 12px;
+    text-align: center;
+  }
+
+  /* ── Access note ── */
+  .access-bar {
+    margin-top: 16px;
+    padding: 12px 18px;
+    border: 1px dashed var(--surface-border);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .access-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+
+  .access-text {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  .access-text strong {
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  /* ── Legend ── */
+  .legend {
+    display: flex;
+    gap: 24px;
+    margin-top: 32px;
+    flex-wrap: wrap;
+    justify-content: center;
+    animation: fadeUp 0.7s ease 0.3s both;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+  }
+
+  .legend-dot.aws { background: var(--accent-aws); }
+  .legend-dot.cpu { background: var(--accent-cpu); }
+  .legend-dot.gpu { background: var(--accent-gpu); }
+  .legend-dot.eks { background: var(--accent-eks); }
+  .legend-dot.ecr { background: var(--accent-ecr); }
+  .legend-dot.ebs { background: var(--text-muted); }
+
+  /* ── Animations ── */
+  @keyframes fadeDown {
+    from { opacity: 0; transform: translateY(-12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (max-width: 800px) {
+    body { padding: 24px 16px; }
+    .top-row { grid-template-columns: 1fr; }
+    .node-groups { grid-template-columns: 1fr; }
+    .pods { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <div class="title-label">PDF RAG Chatbot</div>
+  <div class="title-main"><strong>Infrastructure</strong> Topology</div>
+  <div class="title-sub">AWS us-east-1 &middot; EKS 1.31 &middot; VPC 10.0.0.0/16</div>
+</div>
+
+<div class="canvas">
+  <!-- AWS Region -->
+  <div class="region">
+    <div class="region-label">AWS us-east-1</div>
+
+    <!-- VPC -->
+    <div class="vpc">
+      <div class="vpc-label">VPC 10.0.0.0/16 &mdash; Private Subnets</div>
+
+      <!-- Top row: EKS Control Plane + ECR -->
+      <div class="top-row">
+        <div class="control-plane">
+          <div class="control-plane-label">
+            EKS Control Plane
+            <span class="badge">managed by AWS &middot; ~$0.10/hr</span>
+          </div>
+          <div class="cp-components">
+            <div class="cp-chip">API Server</div>
+            <div class="cp-chip">etcd</div>
+            <div class="cp-chip">Scheduler</div>
+            <div class="cp-chip">CoreDNS</div>
+            <div class="cp-chip">kube-proxy</div>
+            <div class="cp-chip">VPC CNI</div>
+            <div class="cp-chip">EBS CSI</div>
+          </div>
+        </div>
+
+        <div class="ecr-block">
+          <div class="ecr-label">ECR Repositories</div>
+          <div class="ecr-repo">chat-api</div>
+          <div class="ecr-repo">ingestion</div>
+          <div class="ecr-repo">embedding</div>
+        </div>
+      </div>
+
+      <!-- Node groups -->
+      <div class="node-groups">
+        <!-- CPU Node Group -->
+        <div class="node-group cpu">
+          <div class="ng-header">
+            <div class="ng-label">CPU Node Group</div>
+            <div class="ng-specs">
+              <span class="spec-tag">t3.xlarge</span>
+              <span class="spec-tag">On-Demand</span>
+              <span class="spec-tag">~$0.17/hr</span>
+            </div>
+          </div>
+          <div class="pods">
+            <div class="pod">
+              <div class="pod-name">Chat API</div>
+              <div class="pod-detail">FastAPI &middot; RAG orchestrator</div>
+              <div class="pod-detail">Port 8000 &middot; Web UI + REST</div>
+            </div>
+            <div class="pod">
+              <div class="pod-name">Embedding Server</div>
+              <div class="pod-detail">Nomic Embed V1.5</div>
+              <div class="pod-detail">Port 8080 &middot; 768-dim vectors</div>
+            </div>
+            <div class="pod has-storage">
+              <div class="pod-name">Qdrant</div>
+              <div class="pod-detail">Vector DB &middot; StatefulSet</div>
+              <div class="pod-detail">Port 6333 &middot; Cosine similarity</div>
+              <div class="storage-badge">EBS PersistentVolume</div>
+            </div>
+            <div class="pod has-storage">
+              <div class="pod-name">PostgreSQL</div>
+              <div class="pod-detail">Relational DB &middot; StatefulSet</div>
+              <div class="pod-detail">Port 5432 &middot; Conversation history</div>
+              <div class="storage-badge">EBS PersistentVolume</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- GPU Node Group -->
+        <div class="node-group gpu">
+          <div class="ng-header">
+            <div class="ng-label">GPU Node Group</div>
+            <div class="ng-specs">
+              <span class="spec-tag">g4dn.xlarge</span>
+              <span class="spec-tag">Spot</span>
+              <span class="spec-tag">~$0.21/hr</span>
+            </div>
+          </div>
+          <div class="taint-badge">Taint: nvidia.com/gpu=true:NoSchedule</div>
+          <div class="pods single">
+            <div class="pod">
+              <div class="pod-name">vLLM</div>
+              <div class="pod-detail">Llama 3.1 8B Instruct AWQ INT4</div>
+              <div class="pod-detail">NVIDIA T4 16GB VRAM</div>
+              <div class="pod-detail">Port 8000 &middot; OpenAI-compatible API</div>
+            </div>
+            <div class="pod">
+              <div class="pod-name">NVIDIA Device Plugin</div>
+              <div class="pod-detail">DaemonSet</div>
+              <div class="pod-detail">Exposes GPU to K8s scheduler</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Access bar -->
+      <div class="access-bar">
+        <div class="access-icon">&#128187;</div>
+        <div class="access-text">
+          <strong>External access:</strong> kubectl port-forward from developer laptop &rarr; svc/chat-api:8000
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot aws"></div>AWS Region</div>
+  <div class="legend-item"><div class="legend-dot eks"></div>EKS Control Plane</div>
+  <div class="legend-item"><div class="legend-dot cpu"></div>CPU Nodes (On-Demand)</div>
+  <div class="legend-item"><div class="legend-dot gpu"></div>GPU Nodes (Spot)</div>
+  <div class="legend-item"><div class="legend-dot ecr"></div>Container Registry</div>
+  <div class="legend-item"><div class="legend-dot ebs"></div>EBS Persistent Storage</div>
+</div>
+
+</body>
+</html>

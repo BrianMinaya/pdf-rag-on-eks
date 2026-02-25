@@ -1,0 +1,61 @@
+# =============================================================================
+# NVIDIA Device Plugin -- GPU Discovery for Kubernetes
+# =============================================================================
+# WHAT DOES THIS DO?
+# The NVIDIA device plugin is a DaemonSet that runs on every GPU node and
+# registers available GPUs with the Kubernetes scheduler. Without it,
+# Kubernetes doesn't know GPUs exist and pods requesting nvidia.com/gpu
+# will stay Pending forever.
+#
+# HOW IT WORKS:
+# 1. Runs as a DaemonSet (one pod per node) on nodes with NVIDIA GPUs
+# 2. Detects GPUs via the NVIDIA driver on the host
+# 3. Advertises them to Kubernetes as "nvidia.com/gpu" allocatable resources
+# 4. When a pod requests nvidia.com/gpu: 1, the plugin mounts /dev/nvidia0
+#    and CUDA libraries into the container automatically
+#
+# WHY A SEPARATE MANIFEST?
+# AWS does NOT include the NVIDIA device plugin as an EKS managed addon.
+# It must be deployed manually. This manifest is applied by deploy-all.sh
+# before any GPU workloads (vLLM).
+# =============================================================================
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-device-plugin-daemonset
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: nvidia-device-plugin-ds
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        name: nvidia-device-plugin-ds
+    spec:
+      # Only run on GPU nodes -- the plugin is useless on CPU nodes
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      priorityClassName: system-node-critical
+      containers:
+        - name: nvidia-device-plugin-ctr
+          image: nvcr.io/nvidia/k8s-device-plugin:v0.17.0
+          env:
+            - name: FAIL_ON_INIT_ERROR
+              value: "false"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: device-plugin
+              mountPath: /var/lib/kubelet/device-plugins
+      volumes:
+        - name: device-plugin
+          hostPath:
+            path: /var/lib/kubelet/device-plugins

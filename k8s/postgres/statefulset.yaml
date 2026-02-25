@@ -1,0 +1,149 @@
+# =============================================================================
+# POSTGRESQL -- Application Database StatefulSet
+# =============================================================================
+# PostgreSQL stores structured application data: conversation history,
+# ingestion logs, document metadata, and user sessions. It does NOT store
+# vectors -- those go in Qdrant.
+#
+# We use a StatefulSet (not a Deployment) because PostgreSQL is stateful:
+# it needs persistent storage that survives pod restarts. See the Qdrant
+# StatefulSet for a detailed explanation of StatefulSet vs Deployment.
+#
+# NOTE: For production, consider replacing with AWS RDS (db.t4g.micro) for
+# automated backups, failover, and patching. Running PostgreSQL in a pod
+# is fine for development only.
+# =============================================================================
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: pdf-rag-chatbot
+  labels:
+    app: postgres
+    project: pdf-rag-chatbot
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+
+  template:
+    metadata:
+      labels:
+        app: postgres
+        project: pdf-rag-chatbot
+    spec:
+      # -----------------------------------------------------------------------
+      # Schedule on CPU nodes only. PostgreSQL doesn't need GPU resources.
+      # -----------------------------------------------------------------------
+      nodeSelector:
+        workload: cpu
+
+      containers:
+        - name: postgres
+          # -----------------------------------------------------------------
+          # postgres:16-alpine is a minimal image (~80MB vs ~400MB for full).
+          # Alpine-based images have a smaller attack surface and faster pulls.
+          # PostgreSQL 16 is the latest stable release with performance
+          # improvements for large datasets.
+          # -----------------------------------------------------------------
+          image: postgres:16-alpine
+
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+
+          # -----------------------------------------------------------------
+          # ENVIRONMENT VARIABLES
+          # -----------------------------------------------------------------
+          # PostgreSQL's official Docker image uses these env vars to
+          # automatically create a database, user, and set the password
+          # on first startup. No manual SQL needed.
+          #
+          # We pull credentials from the Secret and the database name
+          # from the ConfigMap -- separation of concerns.
+          # -----------------------------------------------------------------
+          env:
+            # From Secret (sensitive)
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rag-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rag-secrets
+                  key: POSTGRES_PASSWORD
+            # From ConfigMap (non-sensitive)
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: rag-config
+                  key: POSTGRES_DB
+
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+
+          # -----------------------------------------------------------------
+          # READINESS PROBE
+          # -----------------------------------------------------------------
+          # pg_isready is a built-in PostgreSQL utility that checks if the
+          # server is accepting connections. Using "exec" probe type runs
+          # a command inside the container (vs httpGet which makes an HTTP call).
+          # -----------------------------------------------------------------
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - "-U"
+                - "ragchat"           # Must match POSTGRES_USER
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+
+          # -----------------------------------------------------------------
+          # VOLUME MOUNT
+          # -----------------------------------------------------------------
+          # Mount persistent storage at PostgreSQL's default data directory.
+          #
+          # IMPORTANT: subPath is critical here!
+          # PostgreSQL requires its data directory to be EMPTY on first init.
+          # But PersistentVolumes often contain a "lost+found" directory from
+          # the filesystem. Using subPath: pgdata tells Kubernetes to mount
+          # a subdirectory ("pgdata") of the volume instead of the root --
+          # which will be empty on first use. Without this, PostgreSQL fails
+          # to initialize with "directory not empty" errors.
+          # -----------------------------------------------------------------
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+              subPath: pgdata
+
+  # ---------------------------------------------------------------------------
+  # VOLUME CLAIM TEMPLATES
+  # ---------------------------------------------------------------------------
+  # 5Gi is plenty for application data (conversations, logs, metadata).
+  # PostgreSQL data is much smaller than vector data in Qdrant.
+  # ---------------------------------------------------------------------------
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-storage
+        labels:
+          app: postgres
+          project: pdf-rag-chatbot
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: gp2
+        resources:
+          requests:
+            storage: 5Gi

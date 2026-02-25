@@ -1,0 +1,164 @@
+# =============================================================================
+# QDRANT -- Vector Database StatefulSet
+# =============================================================================
+# Qdrant is a purpose-built vector database. It stores document chunks as
+# high-dimensional vectors (embeddings) and enables fast similarity search.
+#
+# WHY StatefulSet instead of Deployment?
+# ---------------------------------------------------------------------------
+# Deployments are for stateless apps -- pods are interchangeable and can be
+# replaced freely. StatefulSets are for stateful apps that need:
+#
+# 1. STABLE NETWORK IDENTITY: Each pod gets a predictable hostname
+#    (qdrant-0, qdrant-1, etc.) that persists across restarts. Deployments
+#    give random names like qdrant-7f8b4c9d6-x2k4j.
+#
+# 2. PERSISTENT STORAGE: Each pod gets its own PersistentVolumeClaim (PVC)
+#    that survives pod restarts and rescheduling. If qdrant-0 crashes and
+#    restarts on a different node, it reattaches to the SAME volume with
+#    all its data intact.
+#
+# 3. ORDERED STARTUP/SHUTDOWN: Pods are created sequentially (0, 1, 2...)
+#    and terminated in reverse order. Important for databases with
+#    leader/follower relationships.
+#
+# With 1 replica, the main benefit is persistent storage --
+# we don't want to lose our entire vector index when the pod restarts.
+# =============================================================================
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: qdrant
+  namespace: pdf-rag-chatbot
+  labels:
+    app: qdrant
+    project: pdf-rag-chatbot
+spec:
+  # ---------------------------------------------------------------------------
+  # serviceName ties this StatefulSet to a headless Service (see service.yaml).
+  # It enables DNS records like qdrant-0.qdrant.pdf-rag-chatbot.svc.cluster.local.
+  # Even though we only have 1 replica, this is required for StatefulSets.
+  # ---------------------------------------------------------------------------
+  serviceName: qdrant
+  replicas: 1
+
+  # ---------------------------------------------------------------------------
+  # selector tells the StatefulSet which pods it manages.
+  # The labels here MUST match the labels in spec.template.metadata.labels.
+  # ---------------------------------------------------------------------------
+  selector:
+    matchLabels:
+      app: qdrant
+
+  template:
+    metadata:
+      labels:
+        app: qdrant
+        project: pdf-rag-chatbot
+    spec:
+      # -----------------------------------------------------------------------
+      # nodeSelector ensures this pod runs on a CPU node, not a GPU node.
+      # Our EKS cluster labels CPU nodes with "workload: cpu" and GPU nodes
+      # with "workload: gpu". Qdrant doesn't need a GPU.
+      # -----------------------------------------------------------------------
+      nodeSelector:
+        workload: cpu
+
+      containers:
+        - name: qdrant
+          image: qdrant/qdrant:v1.13.2
+
+          ports:
+            # Qdrant exposes two APIs:
+            - name: http           # REST API -- used by our services
+              containerPort: 6333
+              protocol: TCP
+            - name: grpc           # gRPC API -- higher performance, used for bulk ops
+              containerPort: 6334
+              protocol: TCP
+
+          # -------------------------------------------------------------------
+          # RESOURCE REQUESTS AND LIMITS
+          # -------------------------------------------------------------------
+          # requests: The MINIMUM resources Kubernetes guarantees to this pod.
+          #           The scheduler uses requests to decide which node to place
+          #           the pod on. If no node has enough free resources, the pod
+          #           stays in Pending state.
+          #
+          # limits:   The MAXIMUM resources the pod can use. If it exceeds the
+          #           memory limit, it gets OOMKilled (Out Of Memory killed).
+          #           If it exceeds the CPU limit, it gets throttled (slowed).
+          #
+          # For a small vector collection: 256-512Mi is plenty.
+          # Production with millions of vectors would need several GB.
+          # -------------------------------------------------------------------
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"          # 250 millicores = 0.25 CPU cores
+            limits:
+              memory: "512Mi"
+              cpu: "500m"          # 500 millicores = 0.5 CPU cores
+
+          # -------------------------------------------------------------------
+          # READINESS PROBE
+          # -------------------------------------------------------------------
+          # Kubernetes uses readiness probes to know when a pod is ready to
+          # receive traffic. Until the probe succeeds, the Service won't route
+          # requests to this pod.
+          #
+          # Qdrant exposes a /healthz endpoint that returns 200 when ready.
+          #
+          # Without a readiness probe, Kubernetes assumes the pod is ready as
+          # soon as the container starts -- which might be before Qdrant has
+          # loaded its data and is actually able to serve requests.
+          # -------------------------------------------------------------------
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 6333
+            initialDelaySeconds: 5       # Wait 5s before first check
+            periodSeconds: 10            # Check every 10s
+            failureThreshold: 3          # Mark unhealthy after 3 failures
+
+          # -------------------------------------------------------------------
+          # VOLUME MOUNT
+          # -------------------------------------------------------------------
+          # Mount the persistent volume at /qdrant/storage where Qdrant
+          # stores its collections, indexes, and WAL (write-ahead log).
+          # -------------------------------------------------------------------
+          volumeMounts:
+            - name: qdrant-storage
+              mountPath: /qdrant/storage
+
+  # ---------------------------------------------------------------------------
+  # VOLUME CLAIM TEMPLATES
+  # ---------------------------------------------------------------------------
+  # This is the StatefulSet superpower. Each replica gets its own PVC
+  # (PersistentVolumeClaim) automatically created from this template.
+  #
+  # For qdrant-0, Kubernetes creates a PVC named "qdrant-storage-qdrant-0".
+  # If the pod restarts, it reattaches to the same PVC -- data survives.
+  #
+  # The PVC requests 10Gi of gp3 storage (AWS EBS). gp3 is the latest
+  # generation of general-purpose SSD on AWS -- good balance of performance
+  # and cost. 10Gi is more than enough for a small collection.
+  #
+  # IMPORTANT: Deleting the StatefulSet does NOT delete the PVCs. You must
+  # delete them manually with: kubectl delete pvc -l app=qdrant -n pdf-rag-chatbot
+  # This is a safety feature to prevent accidental data loss.
+  # ---------------------------------------------------------------------------
+  volumeClaimTemplates:
+    - metadata:
+        name: qdrant-storage
+        labels:
+          app: qdrant
+          project: pdf-rag-chatbot
+      spec:
+        accessModes:
+          - ReadWriteOnce          # Only one node can mount this volume at a time
+        storageClassName: gp2      # AWS EBS storage class (default on EKS)
+        resources:
+          requests:
+            storage: 10Gi

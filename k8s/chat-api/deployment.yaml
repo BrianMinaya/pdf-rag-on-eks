@@ -1,0 +1,111 @@
+# =============================================================================
+# CHAT API -- RAG Pipeline Orchestrator
+# =============================================================================
+# The Chat API is the brain of the RAG chatbot. When a user asks a question,
+# it orchestrates the entire pipeline:
+#
+# 1. EMBED: Send the user's question to the embedding service to get a vector
+# 2. SEARCH: Query Qdrant with that vector to find the most similar PDF chunks
+# 3. PROMPT: Assemble a prompt with the user's question + retrieved chunks
+# 4. GENERATE: Send the prompt to vLLM to get a natural language answer
+# 5. RESPOND: Return the answer with source citations (which PDF, which page)
+#
+# This is a stateless service -- it doesn't store anything locally. All state
+# lives in PostgreSQL (conversation history) and Qdrant (vectors). This means
+# we can scale it horizontally by increasing replicas.
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chat-api
+  namespace: pdf-rag-chatbot
+  labels:
+    app: chat-api
+    project: pdf-rag-chatbot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chat-api
+
+  template:
+    metadata:
+      labels:
+        app: chat-api
+        project: pdf-rag-chatbot
+    spec:
+      nodeSelector:
+        workload: cpu
+
+      containers:
+        - name: chat-api
+          # -----------------------------------------------------------------
+          # CONTAINER IMAGE
+          # -----------------------------------------------------------------
+          # TODO: Replace ACCOUNT_ID with your AWS account ID.
+          # This image is built from the chat-api service code and pushed
+          # to Amazon ECR (Elastic Container Registry).
+          #
+          # Example: 123456789012.dkr.ecr.us-east-1.amazonaws.com/pdf-rag-chatbot/chat-api:latest
+          # -----------------------------------------------------------------
+          image: <YOUR_AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/pdf-rag-chatbot/chat-api:latest
+
+          # -----------------------------------------------------------------
+          # IMAGE PULL POLICY
+          # -----------------------------------------------------------------
+          # "Always" forces Kubernetes to pull the image on every pod start,
+          # even if a cached version exists on the node. This ensures we
+          # always run the latest code during development.
+          #
+          # For production, use a specific tag (e.g., :v1.2.3) and set
+          # imagePullPolicy to "IfNotPresent" for faster startup.
+          # -----------------------------------------------------------------
+          imagePullPolicy: Always
+
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+
+          # -----------------------------------------------------------------
+          # ENVIRONMENT VARIABLES -- Bulk injection from ConfigMap
+          # -----------------------------------------------------------------
+          # envFrom injects ALL keys from the ConfigMap as env vars.
+          # This is cleaner than listing each variable individually when
+          # the service needs most/all of the config values.
+          #
+          # The chat-api gets: QDRANT_HOST, EMBEDDING_URL, VLLM_URL,
+          # RAG_TOP_K, RAG_TEMPERATURE, etc. -- everything it needs to
+          # call the embedding service, Qdrant, vLLM, and PostgreSQL.
+          # -----------------------------------------------------------------
+          envFrom:
+            - configMapRef:
+                name: rag-config
+            - secretRef:
+                name: rag-secrets
+
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+          # -----------------------------------------------------------------
+          # READINESS PROBE
+          # -----------------------------------------------------------------
+          # The chat-api exposes a /health endpoint that returns 200 when
+          # the FastAPI server is running and ready to handle requests.
+          #
+          # 10s initial delay is enough for a lightweight Python/FastAPI
+          # app to start -- unlike vLLM or TEI, there's no model to load.
+          # -----------------------------------------------------------------
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3

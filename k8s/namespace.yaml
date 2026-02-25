@@ -1,0 +1,24 @@
+# =============================================================================
+# NAMESPACE
+# =============================================================================
+# A Namespace is a virtual cluster inside Kubernetes. It provides isolation
+# between different projects or environments (dev, staging, prod). All
+# resources for our RAG chatbot live in this namespace so they don't collide
+# with other workloads on the same cluster.
+#
+# Think of it like a folder -- everything we deploy goes inside "pdf-rag-chatbot".
+#
+# Apply first:  kubectl apply -f namespace.yaml
+# Then apply everything else with:  kubectl apply -f . --recursive
+# =============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pdf-rag-chatbot
+  labels:
+    # Labels are key-value tags for organizing and selecting resources.
+    # They have no functional effect but are useful for filtering:
+    #   kubectl get all -l project=pdf-rag-chatbot
+    project: pdf-rag-chatbot
+    environment: dev
